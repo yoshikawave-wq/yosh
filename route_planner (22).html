@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ルートプランナー</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<style>
+  :root {
+    --ink: #1f2a24;
+    --paper: #f6f3ea;
+    --panel: #fffdf7;
+    --line: #d8d0b8;
+    --route: #c1541f;
+    --pin: #2f5d4f;
+    --pin-start: #c1541f;
+    --mono: "IBM Plex Mono", "Courier New", monospace;
+    --serif: "Georgia", "Iowan Old Style", serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--serif); height: 100%; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  header {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    flex: 0 0 auto;
+  }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: 0.02em; font-weight: 700; }
+  header .tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6250; }
+  .layout { flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+  .panel { border-right: 1px solid var(--line); background: var(--panel); padding: 16px 18px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .panel label { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.09em; color: #6b6250; display: block; margin-bottom: 6px; }
+  textarea, input[type="text"] {
+    width: 100%; font-family: var(--serif); font-size: 16px;
+    padding: 10px 12px; border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--ink); line-height: 1.5;
+  }
+  textarea { min-height: 130px; resize: vertical; }
+  input[type="text"] { margin-bottom: 4px; }
+  .hint { font-size: 11.5px; color: #8a8168; margin: 6px 0 14px; line-height: 1.5; }
+  .color-picker { display: flex; gap: 6px; }
+  .swatch {
+    width: 16px; height: 16px; border-radius: 50%; border: 2px solid transparent;
+    padding: 0; cursor: pointer; -webkit-appearance: none; flex: 0 0 auto;
+  }
+  .swatch.active { border-color: var(--ink); box-shadow: 0 0 0 1px #fff, 0 0 0 3px var(--ink); }
+
+  .hint-details { margin-bottom: 12px; }
+  .hint-details summary {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: #6b6250; cursor: pointer; padding: 4px 0; list-style: none;
+  }
+  .hint-details summary::-webkit-details-marker { display: none; }
+  .hint-details summary::before { content: '▸ '; }
+  .hint-details[open] summary::before { content: '▾ '; }
+  .hint-details input[type="text"] { margin-top: 6px; }
+
+  .order-toggle { margin-bottom: 12px; }
+  .radio-opt {
+    display: flex; align-items: center; gap: 7px; font-size: 13px; font-family: var(--serif);
+    text-transform: none; letter-spacing: normal; color: var(--ink); padding: 4px 0; cursor: pointer;
+  }
+  .radio-opt input { margin: 0; accent-color: var(--pin); }
+
+  .mode-note {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 14px;
+    font-family: var(--mono); font-size: 11px; color: #4a5d40;
+    background: #eef1e2; border: 1px solid #d7ddc2; border-radius: 3px; padding: 7px 10px;
+  }
+  button {
+    font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.05em; text-transform: uppercase;
+    border: none; border-radius: 3px; cursor: pointer; -webkit-appearance: none;
+  }
+  #runBtn { width: 100%; background: var(--pin); color: #fff; padding: 12px 14px; transition: opacity 0.15s ease; }
+  #runBtn:disabled { opacity: 0.5; cursor: default; }
+  #runBtn:active { opacity: 0.75; }
+
+  .status { font-family: var(--mono); font-size: 11px; color: #6b6250; margin-top: 9px; min-height: 14px; white-space: pre-line; }
+  .status.err { color: var(--route); }
+
+  .toll-box {
+    margin: 4px 0 16px;
+    padding: 12px 14px;
+    background: #f7ece1;
+    border: 1px solid #e2bb9b;
+    border-radius: 4px;
+  }
+  .toll-box label {
+    color: #7a4726;
+    margin-bottom: 8px;
+  }
+  .toll-row { display: flex; align-items: center; gap: 10px; }
+  .toll-row input[type="number"] {
+    width: 90px; font-family: var(--mono); font-size: 14px; padding: 6px 8px;
+    border: 1px solid #e2bb9b; border-radius: 3px; background: #fff;
+  }
+  .toll-row .toll-fee { font-family: var(--mono); font-size: 20px; font-weight: 700; color: var(--route); }
+  .toll-box .hint { margin: 8px 0 0; }
+  .navitime-link {
+    display: inline-block; margin-top: 10px; font-family: var(--mono); font-size: 11px;
+    color: #7a4726; text-decoration: underline;
+  }
+  .link-row { display: flex; gap: 16px; flex-wrap: wrap; }
+
+  .summary { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); display: none; }
+  .summary.show { display: block; }
+  .summary .stats { display: flex; gap: 16px; margin-bottom: 14px; }
+  .summary .stat .num { font-family: var(--mono); font-size: 20px; font-weight: 700; color: var(--route); line-height: 1; }
+  .summary .stat .lbl { font-family: var(--mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; color: #8a8168; margin-top: 2px; }
+
+  .actions { display: flex; gap: 8px; margin-bottom: 14px; }
+  .actions button {
+    flex: 1; padding: 9px 8px; background: #fff; color: var(--ink); border: 1px solid var(--line);
+  }
+  .actions button:active { background: #efe9d8; }
+
+  ol.stops { list-style: none; margin: 0; padding: 0; counter-reset: stop; }
+  ol.stops li { counter-increment: stop; display: flex; gap: 9px; padding: 8px 0; border-bottom: 1px solid #eee7d3; font-size: 12.5px; line-height: 1.35; align-items: flex-start; }
+  ol.stops li .badge {
+    flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; color: #fff;
+    font-family: var(--mono); font-size: 10.5px; display: flex; align-items: center; justify-content: center;
+  }
+  ol.stops li .addr { flex: 1; }
+  ol.stops li .leg { font-family: var(--mono); font-size: 10.5px; color: #8a8168; display: block; margin-top: 2px; }
+  ol.stops li .matched { font-family: var(--mono); font-size: 10px; color: #a89a78; display: block; margin-top: 2px; font-style: italic; }
+  ol.stops li .color-picker { margin-top: 5px; }
+
+  #map { height: 100%; width: 100%; background: #e9e4d4; }
+
+  .leaflet-popup-content-wrapper { background: var(--panel); color: var(--ink); font-family: var(--serif); border-radius: 4px; }
+  .pin-label {
+    background: var(--pin); color: #fff; font-family: var(--mono); font-size: 11px; font-weight: 700;
+    width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+    display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  }
+  .pin-label span { transform: rotate(45deg); }
+  .pin-label.start { background: var(--pin-start); box-shadow: 0 0 0 3px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.35); }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+    background: #1f2a24; color: #fff; font-family: var(--mono); font-size: 12px;
+    padding: 10px 16px; border-radius: 4px; opacity: 0; pointer-events: none; transition: all 0.2s ease; z-index: 9999;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .dist-tooltip {
+    font-family: var(--mono); font-size: 11.5px; background: #1f2a24; color: #fff;
+    border: none; padding: 5px 9px; border-radius: 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    cursor: pointer;
+  }
+  .dist-tooltip::before { border-top-color: #1f2a24; }
+  .dist-close { opacity: 0.6; margin-left: 4px; }
+
+  @media (max-width: 720px) {
+    header { padding: 12px 14px 10px; }
+    .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .panel { border-right: none; border-bottom: 1px solid var(--line); max-height: 56vh; }
+    #map { min-height: 38vh; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ルートプランナー</h1>
+  <div class="tag">Address → Pins → Optimized Route</div>
+</header>
+
+<div class="layout">
+  <div class="panel">
+    <label for="addrInput">住所リスト（1行に1件、1行目が出発地）</label>
+    <textarea id="addrInput" placeholder="西区上新地">西区上新地</textarea>
+    <button id="runBtn">地図に表示してルート作成</button>
+    <div class="status" id="statusMsg"></div>
+    <details class="hint-details">
+      <summary>地域のヒント（任意・詳細設定）</summary>
+      <label for="regionHint" style="margin-top:8px;">例: 兵庫県</label>
+      <input type="text" id="regionHint" placeholder="例: 兵庫県神戸市" value="兵庫県">
+    </details>
+    <label>並び順</label>
+    <div class="order-toggle">
+      <label class="radio-opt"><input type="radio" name="orderMode" value="optimize" checked> 自動で最短ルートに並び替える</label>
+      <label class="radio-opt"><input type="radio" name="orderMode" value="keep"> 入力した順番のまま（並び替えない）</label>
+    </div>
+    <label class="radio-opt" style="margin-bottom:4px;"><input type="checkbox" id="boundaryToggle" checked> 市区町村の境界線を表示</label>
+    <label class="radio-opt" style="margin-bottom:14px;"><input type="checkbox" id="tollToggle"> 高速代の概算を表示（中型車・ETC想定）</label>
+    <div class="hint">地図上のピンを2つクリックすると、その間の実際のルート線と距離・時間を表示します。ラベルか地図の何もない場所をクリックすると閉じて全体ルートに戻ります。</div>
+
+    <div class="summary" id="summary">
+      <div class="stats">
+        <div class="stat"><div class="num" id="statDist">–</div><div class="lbl">合計距離 (km)</div></div>
+        <div class="stat"><div class="num" id="statTime">–</div><div class="lbl">合計時間</div></div>
+      </div>
+      <div class="toll-box" id="tollBox" style="display:none;">
+        <label for="tollDist">高速道路利用距離 (km) ・車種: 中型車</label>
+        <div class="toll-row">
+          <input type="number" id="tollDist" min="0" step="0.1" value="0">
+          <span class="toll-fee" id="tollFee">¥ –</span>
+        </div>
+        <div class="hint">総走行距離が自動で入りますが、一般道区間がある場合は高速道路部分の距離に修正してください。NEXCOの標準料金式（24.6円/km・中型車比率1.2・長距離逓減・ETC想定）による概算です。東京・大阪近郊区間や曜日割引は反映されないため、正確な金額は下記でご確認ください。</div>
+        <div class="link-row">
+          <a href="https://www.driveplaza.com/" target="_blank" rel="noopener" class="navitime-link">NEXCO公式「ドラぷら」で確認する ↗</a>
+          <a href="https://www.navitime.co.jp/highway/" target="_blank" rel="noopener" class="navitime-link">NAVITIMEで確認する ↗</a>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="shareBtn">結果を共有</button>
+        <button id="saveBtn">ページを保存</button>
+      </div>
+      <ol id="stops" class="stops"></ol>
+    </div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// Captured before Leaflet or user input mutate the DOM, so saved/shared
+// copies of this page always start from the original clean template.
+const PAGE_TEMPLATE = document.documentElement.outerHTML;
+
+const map = L.map('map', { zoomControl: true, tap: true }).setView([35.681, 139.767], 12);
+L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+  maxZoom: 20,
+  subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+  attribution: '&copy; Google Maps'
+}).addTo(map);
+
+// Dashed municipal (shi/ku/machi/son) boundary overlay, refreshed for the
+// area currently in view once a route is drawn.
+let boundaryLayer = L.layerGroup().addTo(map);
+let lastBoundaryBounds = null;
+
+document.getElementById('boundaryToggle').addEventListener('change', (e) => {
+  if (e.target.checked) {
+    map.addLayer(boundaryLayer);
+    if (lastBoundaryBounds) drawAdminBoundaries(lastBoundaryBounds);
+  } else {
+    map.removeLayer(boundaryLayer);
+  }
+});
+
+// NEXCO standard toll formula (normal region): 24.6 yen/km base unit,
+// vehicle-class ratio (中型車 = 1.2), long-distance discount tiers,
+// fixed ¥150 usage fee, 10% tax, rounded to nearest 10 yen. This is an
+// estimate — NAVITIME's exact ETC toll API requires a paid contract/API
+// key we don't have access to, so this formula-based approximation is
+// shown instead, and only when the toggle below is turned on.
+const TOLL_UNIT_YEN_PER_KM = 24.6;
+const VEHICLE_RATIO_CHUGATA = 1.2;
+
+function estimateToll(distanceKm) {
+  const L = Math.max(0, distanceKm);
+  let tieredKm;
+  if (L <= 100) {
+    tieredKm = L;
+  } else if (L <= 200) {
+    tieredKm = 100 + (L - 100) * (1 - 0.25);
+  } else {
+    tieredKm = 100 + 100 * (1 - 0.25) + (L - 200) * (1 - 0.30);
+  }
+  const distanceCost = tieredKm * TOLL_UNIT_YEN_PER_KM * VEHICLE_RATIO_CHUGATA;
+  const raw = (distanceCost + 150) * 1.1;
+  return Math.round(raw / 10) * 10;
+}
+
+function updateTollDisplay() {
+  const km = parseFloat(document.getElementById('tollDist').value) || 0;
+  const fee = estimateToll(km);
+  document.getElementById('tollFee').textContent = '¥ ' + fee.toLocaleString('ja-JP') + '（概算）';
+}
+
+document.getElementById('tollDist').addEventListener('input', updateTollDisplay);
+
+document.getElementById('tollToggle').addEventListener('change', (e) => {
+  document.getElementById('tollBox').style.display = e.target.checked ? 'block' : 'none';
+  if (e.target.checked) updateTollDisplay();
+});
+
+map.on('click', () => {
+  if (selectionState.length || distanceTooltip || segmentLine) clearSegmentSelection();
+});
+
+async function drawAdminBoundaries(bounds) {
+  lastBoundaryBounds = bounds;
+  if (!document.getElementById('boundaryToggle').checked) return;
+  try {
+    const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+    const bbox = sw.lat + ',' + sw.lng + ',' + ne.lat + ',' + ne.lng;
+    const query = '[out:json][timeout:20];relation["boundary"="administrative"]["admin_level"~"^(7|8)$"](' + bbox + ');out geom;';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 9000);
+    const res = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query), { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error('overpass ' + res.status);
+    const data = await res.json();
+    boundaryLayer.clearLayers();
+    let count = 0;
+    (data.elements || []).forEach(rel => {
+      (rel.members || []).forEach(mem => {
+        if (mem.type === 'way' && mem.geometry && mem.geometry.length > 1) {
+          const latlngs = mem.geometry.map(pt => [pt.lat, pt.lon]);
+          L.polyline(latlngs, { color: '#ffffff', weight: 5, opacity: 0.85, lineCap: 'round' }).addTo(boundaryLayer);
+          L.polyline(latlngs, { color: '#6b2fb3', weight: 2.5, opacity: 0.95, dashArray: '9,7', lineCap: 'round' }).addTo(boundaryLayer);
+          count++;
+        }
+      });
+    });
+    setStatus(statusEl.textContent + (count ? ' ・市区町村境界を表示しました' : ' ・この範囲に境界データが見つかりませんでした'));
+  } catch (e) {
+    console.warn('boundary overlay skipped', e);
+    setStatus(statusEl.textContent + ' ・境界線の取得に失敗しました（ルート表示自体は正常です）');
+  }
+}
+
+let markers = [];
+let routeLine = null;
+let lastSummaryText = '';
+let lastRunData = null; // full state needed to rebuild the map without re-geocoding
+let pointColors = []; // hex color per stop, indexed same as ordered stops
+let currentLegs = []; // trip.legs, used for pin-to-pin distance lookups
+let selectionState = []; // indices of pins clicked, max 2, for distance lookup
+let distanceTooltip = null;
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+let segmentLine = null;
+
+function clearSegmentSelection() {
+  selectionState = [];
+  if (distanceTooltip) { map.removeLayer(distanceTooltip); distanceTooltip = null; }
+  if (segmentLine) { map.removeLayer(segmentLine); segmentLine = null; }
+  if (routeLine && !map.hasLayer(routeLine)) map.addLayer(routeLine);
+}
+
+async function handlePinClick(idx) {
+  // Close any lingering name tooltips first — on touch devices a tap opens
+  // the hover-tooltip and it has nothing to make it close on its own, which
+  // is what was causing it to sit on screen and collide with the distance
+  // tooltip once two pins were picked.
+  markers.forEach(m => m.closeTooltip());
+
+  if (selectionState.length === 0) {
+    clearSegmentSelection();
+    selectionState = [idx];
+    showToast('地点' + (idx + 1) + 'を選択。もう一つピンをクリックしてください。');
+    return;
+  }
+
+  const a = selectionState[0], b = idx;
+  selectionState = [];
+  if (a === b) return;
+
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const pA = markers[lo].getLatLng(), pB = markers[hi].getLatLng();
+
+  // Hide the full multi-stop route while showing just this segment
+  if (routeLine && map.hasLayer(routeLine)) map.removeLayer(routeLine);
+  if (segmentLine) { map.removeLayer(segmentLine); segmentLine = null; }
+
+  let coords = [pA, pB];
+  let distM = null, durS = null;
+  try {
+    const url = 'https://router.project-osrm.org/route/v1/driving/' +
+      pA.lng + ',' + pA.lat + ';' + pB.lng + ',' + pB.lat + '?overview=full&geometries=geojson';
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code === 'Ok' && data.routes && data.routes[0]) {
+      coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+      distM = data.routes[0].distance;
+      durS = data.routes[0].duration;
+    }
+  } catch (e) {
+    // fall back to the straight line already set in coords
+  }
+
+  const segCasing = L.polyline(coords, { color: '#ffffff', weight: 8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' });
+  const segColored = L.polyline(coords, { color: '#e07a1f', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round', dashArray: distM === null ? '4,6' : null });
+  segmentLine = L.layerGroup([segCasing, segColored]).addTo(map);
+
+  const label = distM !== null
+    ? ('地点' + (lo + 1) + ' → 地点' + (hi + 1) + '：' + (distM / 1000).toFixed(1) + ' km ・ 約' + fmtMin(durS))
+    : ('地点' + (lo + 1) + ' → 地点' + (hi + 1) + '：直線距離のみ表示（ルート取得失敗）');
+
+  if (distanceTooltip) { map.removeLayer(distanceTooltip); distanceTooltip = null; }
+  distanceTooltip = L.tooltip({ permanent: true, interactive: true, direction: 'top', className: 'dist-tooltip', offset: [0, -12] })
+    .setLatLng(coords[Math.floor(coords.length / 2)])
+    .setContent(label + ' <span class="dist-close">✕</span>')
+    .addTo(map);
+  distanceTooltip.on('add', () => {
+    const el = distanceTooltip.getElement();
+    if (el) el.addEventListener('click', clearSegmentSelection);
+  });
+}
+
+const COLOR_MAP = {
+  black: '#1a1a1a',
+  red:   '#c0392b',
+  blue:  '#1d4ed8',
+  green: '#15803d'
+};
+const COLOR_ORDER = ['black', 'red', 'blue', 'green'];
+const ROUTE_LINE_COLOR = '#3a3a3a';
+
+function colorSwatchesHtml(idx, activeKey) {
+  return '<div class="color-picker" data-idx="' + idx + '">' +
+    COLOR_ORDER.map(key =>
+      '<button type="button" class="swatch' + (key === activeKey ? ' active' : '') + '" ' +
+      'data-idx="' + idx + '" data-color="' + key + '" style="background:' + COLOR_MAP[key] + '"></button>'
+    ).join('') +
+    '</div>';
+}
+
+function setStopColor(idx, key) {
+  pointColors[idx] = key;
+  if (markers[idx]) markers[idx].setIcon(pinIcon(idx + 1, key, idx === 0));
+  const li = stopsEl.children[idx];
+  if (li) {
+    li.querySelector('.badge').style.background = COLOR_MAP[key];
+    li.querySelectorAll('.color-picker .swatch').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.color === key);
+    });
+  }
+}
+
+const statusEl = document.getElementById('statusMsg');
+const runBtn = document.getElementById('runBtn');
+const summaryEl = document.getElementById('summary');
+const stopsEl = document.getElementById('stops');
+const toastEl = document.getElementById('toast');
+
+// Delegated click handler: swatches are re-created on every route run
+stopsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.swatch');
+  if (!btn) return;
+  setStopColor(parseInt(btn.dataset.idx, 10), btn.dataset.color);
+});
+
+function setStatus(msg, isErr) {
+  statusEl.textContent = msg || '';
+  statusEl.className = 'status' + (isErr ? ' err' : '');
+}
+
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  setTimeout(() => toastEl.classList.remove('show'), 2200);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// GSI (国土地理院) address search — built from Japan's own administrative
+// address/place-name database, so it covers fine-grained town names
+// (e.g. "港島中町") that OpenStreetMap/Nominatim often lacks for Japan.
+// Free, no key, CORS-enabled. Tried first; Nominatim is the fallback.
+async function geocodeGSI(address) {
+  try {
+    const url = 'https://msearch.gsi.go.jp/address-search/AddressSearch?q=' + encodeURIComponent(address);
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || !data.length) return null;
+    const hit = data[0];
+    const coords = hit.geometry && hit.geometry.coordinates;
+    if (!coords) return null;
+    return { lat: coords[1], lon: coords[0], display: hit.properties.title };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function geocode(address, viewbox) {
+  const gsiHit = await geocodeGSI(address);
+  if (gsiHit) return gsiHit;
+
+  // Fall back to Nominatim/OSM data if GSI has nothing for this query
+  // (e.g. a shop/facility name rather than a formal address).
+  // viewbox is a soft bias only (no &bounded=1): it nudges Nominatim to
+  // prefer matches near the hinted region, but a genuinely correct match
+  // outside it (e.g. an Okayama address in an otherwise-Hyogo list) can
+  // still win rather than being forced into a wrong in-region result.
+  let url = 'https://nominatim.openstreetmap.org/search?format=json&limit=8&countrycodes=jp&q=' + encodeURIComponent(address);
+  if (viewbox) url += '&viewbox=' + viewbox;
+  const res = await fetch(url, { headers: { 'Accept-Language': 'ja' } });
+  if (!res.ok) throw new Error('検索に失敗しました: ' + address);
+  const data = await res.json();
+  if (!data.length) throw new Error('見つかりません: ' + address);
+
+  // Shops, cafes, restaurants etc. can share a kanji or two with the query
+  // and outrank the actual place name in plain text search. Prefer real
+  // places/administrative areas (and postal addresses) over that kind of
+  // business/POI result whenever one is available. Beyond that, trust
+  // Nominatim's own top-ranked result rather than second-guessing it —
+  // automatic ambiguity/mismatch checks here turned out to reject plenty of
+  // genuinely correct addresses along with the occasional bad one.
+  const PLACE_CLASSES = ['boundary', 'place'];
+  const placeLike = data.filter(d => PLACE_CLASSES.includes(d.class) || d.class === 'landuse');
+  const candidates = placeLike.length ? placeLike : data;
+  const best = candidates[0];
+
+  return { lat: parseFloat(best.lat), lon: parseFloat(best.lon), display: best.display_name };
+}
+
+// Resolves the region hint (e.g. "兵庫県") to a bounding box, used only as a
+// soft ranking bias in geocode() — it nudges ambiguous ward/town names
+// toward the intended region without blocking genuinely correct matches
+// that lie outside it (e.g. a real Okayama address in a mostly-Hyogo list).
+async function getRegionViewbox(hint) {
+  if (!hint || !hint.trim()) return null;
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&q=' + encodeURIComponent(hint.trim());
+    const res = await fetch(url, { headers: { 'Accept-Language': 'ja' } });
+    const data = await res.json();
+    if (!data.length || !data[0].boundingbox) return null;
+    const [south, north, west, east] = data[0].boundingbox.map(parseFloat);
+    return west + ',' + north + ',' + east + ',' + south; // left,top,right,bottom
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearMap() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  if (distanceTooltip) { map.removeLayer(distanceTooltip); distanceTooltip = null; }
+  if (segmentLine) { map.removeLayer(segmentLine); segmentLine = null; }
+  selectionState = [];
+}
+
+function pinIcon(label, colorKey, isStart) {
+  const hex = COLOR_MAP[colorKey] || COLOR_MAP.black;
+  const extraShadow = isStart ? ', 0 0 0 3px rgba(0,0,0,0.15)' : '';
+  return L.divIcon({
+    className: '',
+    html: '<div class="pin-label" style="background:' + hex + '; box-shadow: 0 1px 3px rgba(0,0,0,0.35)' + extraShadow + ';"><span>' + label + '</span></div>',
+    iconSize: [28, 28],
+    iconAnchor: [14, 28]
+  });
+}
+
+function fmtMin(sec) {
+  const mins = Math.round(sec / 60);
+  return mins >= 60 ? Math.floor(mins / 60) + '時間' + (mins % 60) + '分' : mins + '分';
+}
+
+function renderResult(ordered, trip, legsArr, colorsArr) {
+  currentLegs = legsArr || [];
+  pointColors = colorsArr || ordered.map((p, i) => (i === 0 ? 'red' : 'black'));
+
+  const bounds = [];
+  ordered.forEach((p, i) => {
+    const marker = L.marker([p.lat, p.lon], { icon: pinIcon(i + 1, pointColors[i], i === 0), bubblingMouseEvents: false })
+      .addTo(map)
+      .bindTooltip('<strong>' + (i + 1) + '. ' + p.original + '</strong>', { direction: 'top', offset: [0, -22] });
+    marker.on('click', () => { marker.closeTooltip(); handlePinClick(i); });
+    markers.push(marker);
+    bounds.push([p.lat, p.lon]);
+  });
+
+  const geoCoords = trip.geometry.coordinates.map(c => [c[1], c[0]]);
+  // White "casing" drawn first so the colored route reads clearly against any basemap
+  const casing = L.polyline(geoCoords, { color: '#ffffff', weight: 8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+  const colored = L.polyline(geoCoords, { color: ROUTE_LINE_COLOR, weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+  routeLine = L.layerGroup([casing, colored]).addTo(map);
+
+  map.fitBounds(bounds, { padding: [40, 40] });
+  drawAdminBoundaries(map.getBounds());
+
+  document.getElementById('statDist').textContent = (trip.distance / 1000).toFixed(1);
+  document.getElementById('statTime').textContent = fmtMin(trip.duration);
+
+  document.getElementById('tollDist').value = (trip.distance / 1000).toFixed(1);
+  updateTollDisplay();
+
+  stopsEl.innerHTML = '';
+  const textLines = ['ルート結果（車移動）', ''];
+  ordered.forEach((p, i) => {
+    const li = document.createElement('li');
+    let legInfo;
+    if (i === 0) {
+      legInfo = '出発地';
+    } else {
+      const leg = currentLegs[i - 1];
+      legInfo = leg ? ('前の地点から ' + (leg.distance / 1000).toFixed(1) + ' km ・ 約' + fmtMin(leg.duration)) : '';
+    }
+    li.innerHTML = '<div class="badge" style="background:' + COLOR_MAP[pointColors[i]] + '">' + (i + 1) + '</div>' +
+      '<div class="addr">' + p.original + '<span class="leg">' + legInfo + '</span>' +
+      '<span class="matched">→ ' + p.display + '</span>' + colorSwatchesHtml(i, pointColors[i]) + '</div>';
+    stopsEl.appendChild(li);
+    textLines.push((i + 1) + '. ' + p.original + (i === 0 ? '（出発地）' : '  [' + legInfo + ']'));
+  });
+  textLines.push('');
+  textLines.push('合計距離: ' + (trip.distance / 1000).toFixed(1) + ' km');
+  textLines.push('合計所要時間: ' + fmtMin(trip.duration));
+  lastSummaryText = textLines.join('\n');
+
+  lastRunData = {
+    lines: ordered.map(p => p.original),
+    regionHint: document.getElementById('regionHint').value,
+    ordered: ordered,
+    trip: { distance: trip.distance, duration: trip.duration, geometry: trip.geometry },
+    legs: currentLegs,
+    colors: pointColors
+  };
+
+  summaryEl.classList.add('show');
+}
+
+function restoreFromState(state) {
+  try {
+    const ta = document.getElementById('addrInput');
+    if (ta && state.lines) ta.value = state.lines.join('\n');
+    const rh = document.getElementById('regionHint');
+    if (rh && state.regionHint !== undefined) rh.value = state.regionHint;
+    if (state.ordered && state.trip) {
+      clearMap();
+      renderResult(state.ordered, state.trip, state.legs || [], state.colors);
+      setStatus('保存されたルートを再表示しました（住所を編集して再作成もできます）。');
+    }
+  } catch (e) {
+    console.warn('failed to restore saved route', e);
+  }
+}
+
+async function run() {
+  const lines = document.getElementById('addrInput').value
+    .split('\n').map(s => s.trim()).filter(Boolean);
+
+  if (lines.length === 0) {
+    setStatus('住所を入力してください。', true);
+    return;
+  }
+
+  if (lines.length === 1) {
+    runBtn.disabled = true;
+    summaryEl.classList.remove('show');
+    clearMap();
+    try {
+      const regionHint = document.getElementById('regionHint').value;
+      let viewbox = null;
+      if (regionHint && regionHint.trim()) {
+        setStatus('地域のヒントを確認中… (' + regionHint + ')');
+        viewbox = await getRegionViewbox(regionHint);
+      }
+      setStatus('住所を検索中… ' + lines[0]);
+      const p = await geocode(lines[0], viewbox);
+      const marker = L.marker([p.lat, p.lon], { icon: pinIcon(1, 'red', true) })
+        .addTo(map)
+        .bindTooltip('<strong>' + lines[0] + '</strong>', { direction: 'top', offset: [0, -22] });
+      markers.push(marker);
+      map.setView([p.lat, p.lon], 16);
+      drawAdminBoundaries(map.getBounds());
+      setStatus('1件のみのためルート計算はせず、ピンだけ表示しました（' + p.display + '）。ルートを組むには住所をもう1件追加してください。');
+    } catch (err) {
+      console.error(err);
+      setStatus('エラー: ' + err.message, true);
+    } finally {
+      runBtn.disabled = false;
+    }
+    return;
+  }
+
+  // Same address entered more than once — flag it rather than silently
+  // treating duplicates as distinct stops.
+  const counts = {};
+  lines.forEach(l => { counts[l] = (counts[l] || 0) + 1; });
+  const dupeNote = Object.keys(counts).filter(k => counts[k] > 1)
+    .map(k => k + '（' + counts[k] + '回）').join('、');
+
+  runBtn.disabled = true;
+  summaryEl.classList.remove('show');
+  clearMap();
+
+  try {
+    const regionHint = document.getElementById('regionHint').value;
+    let viewbox = null;
+    if (regionHint && regionHint.trim()) {
+      setStatus('地域のヒントを確認中… (' + regionHint + ')');
+      viewbox = await getRegionViewbox(regionHint);
+    }
+
+    const points = [];
+    for (let i = 0; i < lines.length; i++) {
+      setStatus('住所を検索中… (' + (i + 1) + '/' + lines.length + ') ' + lines[i]);
+      const p = await geocode(lines[i], viewbox);
+      points.push({ ...p, original: lines[i] });
+      if (i < lines.length - 1) await sleep(1000);
+    }
+
+    setStatus('道路網への接続を確認中…');
+    const badPoints = [];
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      try {
+        const nearUrl = 'https://router.project-osrm.org/nearest/v1/driving/' + p.lon + ',' + p.lat;
+        const nearRes = await fetch(nearUrl);
+        const nearData = await nearRes.json();
+        if (nearData.code !== 'Ok' || !nearData.waypoints || !nearData.waypoints.length) {
+          badPoints.push(p.original);
+        } else {
+          const snapDist = nearData.waypoints[0].distance; // meters to nearest road
+          if (snapDist > 3000) badPoints.push(p.original + '（最寄り道路まで約' + Math.round(snapDist / 1000) + 'km離れています）');
+        }
+      } catch (e) {
+        badPoints.push(p.original + '（確認できませんでした）');
+      }
+    }
+    if (badPoints.length) {
+      throw new Error('車で行けない可能性がある地点があります。住所を見直してください：\n・' + badPoints.join('\n・'));
+    }
+
+    const keepOrder = document.querySelector('input[name="orderMode"]:checked').value === 'keep';
+    const coordStr = points.map(p => p.lon + ',' + p.lat).join(';');
+    let ordered, trip, legs;
+
+    if (keepOrder) {
+      setStatus('入力した順番のままルートを計算中…');
+      // The "route" service (not "trip") never reorders stops — it simply
+      // routes through the coordinates in the exact order given.
+      const routeUrl = 'https://router.project-osrm.org/route/v1/driving/' + coordStr +
+        '?geometries=geojson&overview=full';
+      const routeRes = await fetch(routeUrl);
+      const routeData = await routeRes.json();
+
+      if (routeData.code !== 'Ok') {
+        const codeMsgs = {
+          NoRoute: 'いずれかの区間で道路をつなげませんでした。',
+          TooBig: '地点数が多すぎて公開デモサーバーの上限を超えました。件数を減らすか、時間をおいて再試行してください。',
+          InvalidUrl: '座標データが不正です。住所を見直してください。'
+        };
+        const friendly = codeMsgs[routeData.code] || (routeData.message || routeData.code);
+        throw new Error('ルート計算に失敗しました（' + routeData.code + '）: ' + friendly);
+      }
+
+      trip = routeData.routes[0];
+      ordered = points; // already in input order
+      legs = trip.legs || [];
+    } else {
+      setStatus('車移動での最適なルートを計算中…');
+      // "driving" profile = car route on the actual road network
+      const tripUrl = 'https://router.project-osrm.org/trip/v1/driving/' + coordStr +
+        '?source=first&roundtrip=false&geometries=geojson&overview=full';
+      const tripRes = await fetch(tripUrl);
+      const tripData = await tripRes.json();
+
+      if (tripData.code !== 'Ok') {
+        const codeMsgs = {
+          NoTrips: 'いずれかの地点が道路網から孤立しているため、ルートを組めませんでした。',
+          TooBig: '地点数が多すぎて公開デモサーバーの上限を超えました。件数を減らすか、時間をおいて再試行してください。',
+          InvalidUrl: '座標データが不正です。住所を見直してください。'
+        };
+        const friendly = codeMsgs[tripData.code] || (tripData.message || tripData.code);
+        throw new Error('ルート計算に失敗しました（' + tripData.code + '）: ' + friendly);
+      }
+
+      trip = tripData.trips[0];
+      const waypoints = tripData.waypoints;
+      ordered = waypoints
+        .map((wp, idx) => ({ ...points[idx], order: wp.waypoint_index }))
+        .sort((a, b) => a.order - b.order);
+      // trip.legs[i] = the leg FROM ordered[i] TO ordered[i+1]
+      legs = trip.legs || [];
+    }
+
+    renderResult(ordered, trip, legs);
+
+    const orderNote = keepOrder ? '入力した順番のまま' : '最短ルートで並べ替えました';
+    const dupeWarning = dupeNote ? ('⚠ 同じ住所が複数回あります: ' + dupeNote + ' ／ ') : '';
+    setStatus(dupeWarning + '完了：' + ordered.length + '地点を' + orderNote + '。');
+  } catch (err) {
+    console.error(err);
+    setStatus('エラー: ' + err.message, true);
+  } finally {
+    runBtn.disabled = false;
+  }
+}
+
+function buildExportDoc() {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(PAGE_TEMPLATE, 'text/html');
+
+  const ta = doc.getElementById('addrInput');
+  if (ta) ta.textContent = document.getElementById('addrInput').value;
+  const rh = doc.getElementById('regionHint');
+  if (rh) rh.setAttribute('value', document.getElementById('regionHint').value);
+
+  if (lastRunData) {
+    const stateScript = doc.createElement('script');
+    stateScript.type = 'application/json';
+    stateScript.id = 'embeddedState';
+    stateScript.textContent = JSON.stringify(lastRunData);
+    // Must be inserted BEFORE the main inline script tag: scripts execute in
+    // document order as the parser reaches them, so if this were appended
+    // after, the main script's restore step would run before this exists.
+    const mainScript = doc.querySelector('body script');
+    if (mainScript) {
+      mainScript.parentNode.insertBefore(stateScript, mainScript);
+    } else {
+      doc.body.appendChild(stateScript);
+    }
+  }
+  return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+}
+
+async function shareResult() {
+  const htmlContent = buildExportDoc();
+  const file = new File([htmlContent], 'route_result.html', { type: 'text/html' });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ title: 'ルート結果', text: lastSummaryText || 'ルート結果', files: [file] });
+      return;
+    } catch (e) {
+      // cancelled — fall through to other options
+    }
+  }
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'ルート結果', text: lastSummaryText });
+      return;
+    } catch (e) {
+      // cancelled
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(lastSummaryText || '');
+    showToast('この環境はファイル共有に対応していないため、結果をテキストでコピーしました');
+  } catch (e) {
+    showToast('共有できませんでした。「ページを保存」から保存してください');
+  }
+}
+
+function savePage() {
+  // Bakes the current addresses and calculated route into a standalone copy
+  // of this page, so anyone who opens it sees the same result immediately —
+  // and can still edit the addresses and recalculate.
+  const htmlContent = buildExportDoc();
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'route_result.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('ページを保存しました');
+}
+
+runBtn.addEventListener('click', run);
+document.getElementById('shareBtn').addEventListener('click', shareResult);
+document.getElementById('saveBtn').addEventListener('click', savePage);
+
+// If this page was opened from a saved/shared file, it will contain an
+// embedded route state — restore it immediately instead of starting blank.
+(function restoreIfEmbedded() {
+  const el = document.getElementById('embeddedState');
+  if (!el) return;
+  try {
+    restoreFromState(JSON.parse(el.textContent));
+  } catch (e) {
+    console.warn('failed to parse embedded state', e);
+  }
+})();
+</script>
+</body>
+</html>
